@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 
 interface LogoMarkProps {
@@ -6,22 +7,14 @@ interface LogoMarkProps {
 
 export function LogoMark({ className }: LogoMarkProps) {
   return (
-    <svg
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-hidden="true"
-      className={cn('size-9', className)}
-    >
-      <rect width="32" height="32" rx="9" className="fill-foreground" />
-      <path
-        d="M20 9v10a4.5 4.5 0 0 1-9 0"
-        className="stroke-background"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="11.5" cy="10" r="2.5" className="fill-primary" />
-    </svg>
+    <Image
+      src="/brand/mascot.webp"
+      alt=""
+      width={80}
+      height={80}
+      priority
+      className={cn('size-10 rounded-xl', className)}
+    />
   )
 }
 
