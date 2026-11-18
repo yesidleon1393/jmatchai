@@ -1,3 +1,4 @@
+import { openai } from '@ai-sdk/openai'
 import { generateText, Output } from 'ai'
 import { NextResponse } from 'next/server'
 import {
@@ -9,8 +10,13 @@ import {
 
 export const maxDuration = 60
 
-// Routed through Vercel AI Gateway; credentials are resolved server-side only.
-const MODEL = 'openai/gpt-5.4-mini'
+const MODEL_NAME = 'gpt-5.4-mini'
+
+// Uses the OpenAI API directly when OPENAI_API_KEY is set; otherwise routes through
+// Vercel AI Gateway. Credentials are only ever read on the server.
+function getModel() {
+  return process.env.OPENAI_API_KEY ? openai(MODEL_NAME) : `openai/${MODEL_NAME}`
+}
 
 const SYSTEM_PROMPT = `You are a senior technical recruiter evaluating how well a candidate's resume matches a job description.
 
@@ -43,7 +49,7 @@ export async function POST(request: Request) {
 
   try {
     const { output } = await generateText({
-      model: MODEL,
+      model: getModel(),
       system: SYSTEM_PROMPT,
       output: Output.object({ schema: evaluationResultSchema }),
       prompt: `<job_description>\n${jobDescription}\n</job_description>\n\n<candidate_resume>\n${resume}\n</candidate_resume>`,
