@@ -14,6 +14,12 @@ export const metadata: Metadata = {
   description:
     'Evaluate candidate compatibility against job requirements. Paste a job description and a resume to get a 0–100 match score with strengths and areas to investigate.',
   generator: 'v0.app',
+  openGraph: {
+    title: 'Jmatch AI — AI Candidate Evaluation',
+    description:
+      'Paste a job description and a resume to get a 0–100 match score with strengths and areas to investigate.',
+    type: 'website',
+  },
 }
 
 export const viewport: Viewport = {
