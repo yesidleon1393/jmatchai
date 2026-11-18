@@ -20,7 +20,7 @@ export default function HomePage() {
       </main>
       <footer className="border-t bg-card">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p>&copy; {new Date().getFullYear()} JennyMatch AI. Technical assessment for JennyHires.</p>
+          <p>&copy; {new Date().getFullYear()} Jmatch AI. Technical assessment for JennyHires.</p>
           <p>AI-assisted evaluations should always be reviewed by a recruiter.</p>
         </div>
       </footer>

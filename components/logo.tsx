@@ -14,13 +14,13 @@ export function LogoMark({ className }: LogoMarkProps) {
     >
       <rect width="32" height="32" rx="9" className="fill-foreground" />
       <path
-        d="M11 9v9.5a3.5 3.5 0 0 0 7 0V9"
+        d="M20 9v10a4.5 4.5 0 0 1-9 0"
         className="stroke-background"
         strokeWidth="2.4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx="22.5" cy="21.5" r="3" className="fill-primary" />
+      <circle cx="11.5" cy="10" r="2.5" className="fill-primary" />
     </svg>
   )
 }
@@ -31,7 +31,7 @@ export function Logo() {
       <LogoMark />
       <div className="flex flex-col leading-tight">
         <span className="text-base font-semibold tracking-tight text-foreground">
-          JennyMatch <span className="text-primary">AI</span>
+          Jmatch <span className="text-primary">AI</span>
         </span>
         <span className="text-xs text-muted-foreground">AI Candidate Evaluation</span>
       </div>

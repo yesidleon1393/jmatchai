@@ -1,6 +1,4 @@
-import { Sparkles } from 'lucide-react'
 import { Logo } from '@/components/logo'
-import { Badge } from '@/components/ui/badge'
 
 const NAV_ITEMS = [
   { label: 'Evaluate', href: '#evaluate' },
@@ -13,7 +11,7 @@ export function SiteHeader() {
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
         <a
           href="#top"
-          aria-label="JennyMatch AI home"
+          aria-label="Jmatch AI home"
           className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <Logo />
@@ -31,13 +29,6 @@ export function SiteHeader() {
               </a>
             ))}
           </nav>
-          <Badge
-            variant="outline"
-            className="h-7 gap-1.5 border-primary/20 bg-accent px-2.5 text-xs font-medium text-accent-foreground"
-          >
-            <Sparkles className="size-3.5 text-primary" aria-hidden="true" />
-            Powered by OpenAI
-          </Badge>
         </div>
       </div>
     </header>
