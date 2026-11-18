@@ -18,9 +18,10 @@ Prueba técnica de desarrollo web para **JennyHires**. Aplicación full-stack co
 8. [Referencia de la API](#referencia-de-la-api)
 9. [Despliegue en Vercel](#despliegue-en-vercel)
 10. [Seguridad](#seguridad)
-11. [Accesibilidad y UX](#accesibilidad-y-ux)
-12. [Decisiones de diseño y mejoras futuras](#decisiones-de-diseño-y-mejoras-futuras)
-13. [Solución de problemas](#solución-de-problemas)
+11. [Testing y verificación](#testing-y-verificación)
+12. [Accesibilidad y UX](#accesibilidad-y-ux)
+13. [Decisiones de diseño y mejoras futuras](#decisiones-de-diseño-y-mejoras-futuras)
+14. [Solución de problemas](#solución-de-problemas)
 
 ---
 
@@ -71,11 +72,14 @@ pnpm dev
 
 Abre [http://localhost:3000](http://localhost:3000).
 
-| Script       | Descripción                         |
-| ------------ | ----------------------------------- |
-| `pnpm dev`   | Servidor de desarrollo              |
-| `pnpm build` | Build de producción                 |
-| `pnpm start` | Sirve el build de producción        |
+| Script           | Descripción                                   |
+| ---------------- | --------------------------------------------- |
+| `pnpm dev`       | Servidor de desarrollo                        |
+| `pnpm build`     | Build de producción                           |
+| `pnpm start`     | Sirve el build de producción                  |
+| `pnpm typecheck` | Comprobación de tipos con TypeScript          |
+| `pnpm test`      | Suite de tests (Vitest)                       |
+| `pnpm audit`     | Auditoría de dependencias de producción       |
 
 ## Configuración de la API key
 
@@ -311,6 +315,24 @@ Detalles a tener en cuenta:
 - **Errores sanitizados**: el cliente recibe mensajes genéricos; los detalles del proveedor se quedan en los logs.
 - **Sin persistencia**: no hay base de datos y los CVs no se almacenan, lo que reduce la superficie de datos personales (RGPD).
 - `.env*` está en `.gitignore`; solo `.env.example` (sin secretos) se versiona.
+- **Rate limiting**: 10 peticiones por minuto e IP en `/api/evaluate` (`429` + `Retry-After`). Es en memoria y por instancia; para límites globales estrictos usa un almacén compartido (p. ej. Upstash Redis).
+- **Endurecimiento de la petición**: exige `Content-Type: application/json` (`415`), limita el cuerpo a 100 KB (`413`) y responde con `Cache-Control: no-store`.
+- **Cabeceras de seguridad** (`next.config.mjs`): `X-Content-Type-Options`, `Referrer-Policy`, `Strict-Transport-Security`, `X-Frame-Options`, `Permissions-Policy`; se desactiva `X-Powered-By`.
+- **Dependencias**: `pnpm audit --prod` sin vulnerabilidades conocidas (el CLI de `shadcn` es una `devDependency`).
+- **Build estricto**: se eliminó `ignoreBuildErrors`; los errores de TypeScript rompen el build.
+
+## Testing y verificación
+
+```bash
+pnpm test        # 23 tests (Vitest)
+pnpm typecheck   # tsc --noEmit
+pnpm audit       # vulnerabilidades en dependencias de producción
+```
+
+Cobertura de la suite (`tests/`):
+
+- **`evaluation.test.ts`**: umbrales de clasificación (0/49/50/69/70/84/85/100), `clampScore` y esquemas Zod (límites, espacios, tipos erróneos).
+- **`evaluate-route.test.ts`**: el Route Handler con el modelo simulado: respuesta correcta con score acotado, delimitadores anti prompt injection, `400` (JSON inválido / entrada corta), `413`, `415`, `429`, fallback de proveedor y `502` genérico que no filtra claves ni errores del proveedor.
 
 ## Accesibilidad y UX
 
@@ -332,7 +354,7 @@ Detalles a tener en cuenta:
 
 **Mejoras posibles**
 
-- Rate limiting por IP (p. ej. Upstash Ratelimit) para proteger el coste en producción.
+- Rate limiting distribuido (p. ej. Upstash Ratelimit) en lugar del límite en memoria actual.
 - Subida de CVs en PDF/DOCX con extracción de texto.
 - Desglose del score por categorías (skills, experiencia, seniority, dominio).
 - Historial de evaluaciones y comparación de varios candidatos (requeriría persistencia y autenticación).
