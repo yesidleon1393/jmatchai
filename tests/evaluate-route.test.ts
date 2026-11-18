@@ -6,7 +6,6 @@ vi.mock('ai', () => ({
   generateText: (...args: unknown[]) => generateText(...args),
   Output: { object: (config: unknown) => config },
 }))
-vi.mock('@ai-sdk/openai', () => ({ openai: (model: string) => ({ provider: 'openai', model }) }))
 
 import { POST } from '@/app/api/evaluate/route'
 import { resetRateLimits } from '@/lib/rate-limit'
@@ -26,7 +25,6 @@ const validBody = { jobDescription: longText, resume: longText }
 beforeEach(() => {
   generateText.mockReset()
   resetRateLimits()
-  delete process.env.OPENAI_API_KEY
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -101,21 +99,18 @@ describe('POST /api/evaluate', () => {
     expect(other.status).toBe(200)
   })
 
-  it('falls back to the gateway when the OpenAI key fails', async () => {
-    process.env.OPENAI_API_KEY = 'sk-test-secret'
-    generateText
-      .mockRejectedValueOnce(new Error('401 invalid key'))
-      .mockResolvedValueOnce({
-        output: { score: 75, assessment: 'Good.', strengths: ['A'], areasToInvestigate: ['B'] },
-      })
+  it('calls the model through the AI Gateway using a plain provider/model id', async () => {
+    generateText.mockResolvedValue({
+      output: { score: 75, assessment: 'Good.', strengths: ['A'], areasToInvestigate: ['B'] },
+    })
 
     const response = await POST(makeRequest(validBody))
     expect(response.status).toBe(200)
-    expect(generateText).toHaveBeenCalledTimes(2)
+    expect(generateText).toHaveBeenCalledTimes(1)
+    expect(generateText.mock.calls[0][0].model).toMatch(/^[a-z0-9-]+\/[\w.-]+$/)
   })
 
   it('returns a generic 502 that never leaks provider errors or secrets', async () => {
-    process.env.OPENAI_API_KEY = 'sk-test-secret'
     generateText.mockRejectedValue(new Error('Incorrect API key provided: sk-test-secret'))
 
     const response = await POST(makeRequest(validBody))

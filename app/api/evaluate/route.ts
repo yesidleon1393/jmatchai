@@ -1,4 +1,3 @@
-import { openai } from '@ai-sdk/openai'
 import { generateText, Output } from 'ai'
 import { NextResponse } from 'next/server'
 import {
@@ -11,22 +10,9 @@ import { checkRateLimit, getClientKey } from '@/lib/rate-limit'
 
 export const maxDuration = 60
 
-const OPENAI_MODEL = 'gpt-4o-mini'
-const GATEWAY_MODEL = 'openai/gpt-5-mini'
-
-type ModelCandidate = { label: string; model: Parameters<typeof generateText>[0]['model'] }
-
-// Tries the OpenAI API directly when OPENAI_API_KEY is set, then falls back to
-// Vercel AI Gateway (also OpenAI models) if that key is rejected, out of credits or
-// lacks model access. Credentials are only ever read on the server.
-function getModelCandidates(): ModelCandidate[] {
-  const candidates: ModelCandidate[] = []
-  if (process.env.OPENAI_API_KEY) {
-    candidates.push({ label: 'openai', model: openai(OPENAI_MODEL) })
-  }
-  candidates.push({ label: 'gateway', model: GATEWAY_MODEL })
-  return candidates
-}
+// Served through Vercel AI Gateway (zero-config auth). A non-reasoning model keeps
+// latency low: this task is classification plus a short summary, not deep reasoning.
+const MODEL = 'openai/gpt-4.1-mini'
 
 const SYSTEM_PROMPT = `You are a senior technical recruiter evaluating how well a candidate's resume matches a job description.
 
@@ -89,28 +75,27 @@ export async function POST(request: Request) {
 
   const prompt = `<job_description>\n${jobDescription}\n</job_description>\n\n<candidate_resume>\n${resume}\n</candidate_resume>`
 
-  for (const { label, model } of getModelCandidates()) {
-    try {
-      const { output } = await generateText({
-        model,
-        system: SYSTEM_PROMPT,
-        output: Output.object({ schema: evaluationResultSchema }),
-        prompt,
-      })
+  try {
+    const { output } = await generateText({
+      model: MODEL,
+      system: SYSTEM_PROMPT,
+      output: Output.object({ schema: evaluationResultSchema }),
+      prompt,
+      temperature: 0.2,
+      maxOutputTokens: 700,
+    })
 
-      const result: EvaluationResult = {
-        ...output,
-        score: clampScore(output.score),
-      }
-
-      return NextResponse.json(result, { headers: NO_STORE })
-    } catch (error) {
-      console.error(`[evaluate] Provider "${label}" failed:`, error)
+    const result: EvaluationResult = {
+      ...output,
+      score: clampScore(output.score),
     }
-  }
 
-  return errorResponse(
-    'We could not complete the evaluation right now. Please try again in a moment.',
-    502,
-  )
+    return NextResponse.json(result, { headers: NO_STORE })
+  } catch (error) {
+    console.error('[evaluate] Model call failed:', error)
+    return errorResponse(
+      'We could not complete the evaluation right now. Please try again in a moment.',
+      502,
+    )
+  }
 }
