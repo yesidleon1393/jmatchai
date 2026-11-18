@@ -10,12 +10,21 @@ import {
 
 export const maxDuration = 60
 
-const MODEL_NAME = 'gpt-5.4-mini'
+const OPENAI_MODEL = 'gpt-4o-mini'
+const GATEWAY_MODEL = 'openai/gpt-5-mini'
 
-// Uses the OpenAI API directly when OPENAI_API_KEY is set; otherwise routes through
-// Vercel AI Gateway. Credentials are only ever read on the server.
-function getModel() {
-  return process.env.OPENAI_API_KEY ? openai(MODEL_NAME) : `openai/${MODEL_NAME}`
+type ModelCandidate = { label: string; model: Parameters<typeof generateText>[0]['model'] }
+
+// Tries the OpenAI API directly when OPENAI_API_KEY is set, then falls back to
+// Vercel AI Gateway (also OpenAI models) if that key is rejected, out of credits or
+// lacks model access. Credentials are only ever read on the server.
+function getModelCandidates(): ModelCandidate[] {
+  const candidates: ModelCandidate[] = []
+  if (process.env.OPENAI_API_KEY) {
+    candidates.push({ label: 'openai', model: openai(OPENAI_MODEL) })
+  }
+  candidates.push({ label: 'gateway', model: GATEWAY_MODEL })
+  return candidates
 }
 
 const SYSTEM_PROMPT = `You are a senior technical recruiter evaluating how well a candidate's resume matches a job description.
@@ -47,25 +56,30 @@ export async function POST(request: Request) {
 
   const { jobDescription, resume } = parsed.data
 
-  try {
-    const { output } = await generateText({
-      model: getModel(),
-      system: SYSTEM_PROMPT,
-      output: Output.object({ schema: evaluationResultSchema }),
-      prompt: `<job_description>\n${jobDescription}\n</job_description>\n\n<candidate_resume>\n${resume}\n</candidate_resume>`,
-    })
+  const prompt = `<job_description>\n${jobDescription}\n</job_description>\n\n<candidate_resume>\n${resume}\n</candidate_resume>`
 
-    const result: EvaluationResult = {
-      ...output,
-      score: clampScore(output.score),
+  for (const { label, model } of getModelCandidates()) {
+    try {
+      const { output } = await generateText({
+        model,
+        system: SYSTEM_PROMPT,
+        output: Output.object({ schema: evaluationResultSchema }),
+        prompt,
+      })
+
+      const result: EvaluationResult = {
+        ...output,
+        score: clampScore(output.score),
+      }
+
+      return NextResponse.json(result)
+    } catch (error) {
+      console.error(`[evaluate] Provider "${label}" failed:`, error)
     }
-
-    return NextResponse.json(result)
-  } catch (error) {
-    console.error('[evaluate] Evaluation failed:', error)
-    return errorResponse(
-      'We could not complete the evaluation right now. Please try again in a moment.',
-      502,
-    )
   }
+
+  return errorResponse(
+    'We could not complete the evaluation right now. Please try again in a moment.',
+    502,
+  )
 }
