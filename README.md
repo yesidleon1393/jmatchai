@@ -2,7 +2,7 @@
 
 **Evaluación de candidatos con IA: pega una oferta de trabajo y un CV, y obtén un score de compatibilidad de 0 a 100 con una explicación concisa.**
 
-Prueba técnica de desarrollo web para **JennyHires**. Aplicación full-stack construida con Next.js (App Router), TypeScript, Tailwind CSS y shadcn/ui. La evaluación se ejecuta de forma real contra la API de OpenAI desde un Route Handler del servidor; la clave nunca llega al navegador.
+Prueba técnica de desarrollo web para **JennyHires**. Aplicación full-stack construida con Next.js (App Router), TypeScript, Tailwind CSS y shadcn/ui. La evaluación se ejecuta de forma real contra un modelo de OpenAI a través de Vercel AI Gateway, desde un Route Handler del servidor; ninguna credencial llega al navegador.
 
 ---
 
@@ -50,7 +50,7 @@ Prueba técnica de desarrollo web para **JennyHires**. Aplicación full-stack co
 | Framework       | Next.js (App Router) + React 19                                        |
 | Lenguaje        | TypeScript (tipos explícitos)                                          |
 | Estilos         | Tailwind CSS v4 + shadcn/ui + Lucide Icons                             |
-| IA              | [AI SDK](https://ai-sdk.dev) (`ai`, `@ai-sdk/openai`) con salida estructurada |
+| IA              | [AI SDK](https://ai-sdk.dev) (`ai`) + Vercel AI Gateway, con salida estructurada |
 | Validación      | Zod (esquemas compartidos entre request, respuesta y UI)               |
 | Gestor          | pnpm                                                                   |
 
@@ -62,9 +62,9 @@ Prueba técnica de desarrollo web para **JennyHires**. Aplicación full-stack co
 # 1. Instalar dependencias
 pnpm install
 
-# 2. Configurar variables de entorno
+# 2. Configurar la autenticación del AI Gateway (solo fuera de Vercel/v0)
 cp .env.example .env.local
-# edita .env.local y añade tu OPENAI_API_KEY
+# edita .env.local y añade tu AI_GATEWAY_API_KEY
 
 # 3. Arrancar en desarrollo
 pnpm dev
@@ -81,18 +81,21 @@ Abre [http://localhost:3000](http://localhost:3000).
 | `pnpm test`      | Suite de tests (Vitest)                       |
 | `pnpm audit`     | Auditoría de dependencias de producción       |
 
-## Configuración de la API key
+## Configuración de credenciales (AI Gateway)
 
-**Dónde colocarla:** en un archivo `.env.local` en la raíz del proyecto (nunca en el código fuente ni en componentes cliente).
+La app usa [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) con un identificador de modelo `proveedor/modelo`. No necesitas crédito ni clave directa de OpenAI.
+
+- **En Vercel y en la vista previa de v0:** la autenticación es automática (OIDC). No hay que configurar nada.
+- **En local o en otro hosting:** crea una clave en el dashboard de AI Gateway y colócala en `.env.local` en la raíz del proyecto (nunca en el código fuente ni en componentes cliente).
 
 ```bash
 # .env.local
-OPENAI_API_KEY=sk-...
+AI_GATEWAY_API_KEY=...
 ```
 
-| Variable         | Obligatoria | Descripción                                                                                  |
-| ---------------- | ----------- | -------------------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY` | Sí (local)  | Clave de la API de OpenAI. Se obtiene en [platform.openai.com/api-keys](https://platform.openai.com/api-keys). |
+| Variable             | Obligatoria              | Descripción                                                                 |
+| -------------------- | ------------------------ | --------------------------------------------------------------------------- |
+| `AI_GATEWAY_API_KEY` | Solo fuera de Vercel/v0  | Clave del AI Gateway. Se lee únicamente en el servidor. |
 
 Notas:
 
@@ -100,18 +103,14 @@ Notas:
 - La variable **no** lleva el prefijo `NEXT_PUBLIC_`, por lo que Next.js no la incluye en el bundle del navegador.
 - Tras modificar variables de entorno, reinicia `pnpm dev`.
 
-### Estrategia de proveedores
+### Modelo y latencia
 
-El Route Handler construye una lista ordenada de proveedores y usa el primero que responda:
-
-1. **OpenAI directo** (`gpt-4o-mini`) si `OPENAI_API_KEY` está definida.
-2. **Vercel AI Gateway** (`openai/gpt-5-mini`) como respaldo, si la clave directa falta, es rechazada o no tiene crédito/acceso al modelo. En despliegues de Vercel la autenticación del Gateway es automática (OIDC), sin claves adicionales.
+El Route Handler usa `openai/gpt-4.1-mini`, un modelo **sin razonamiento extendido**: la tarea es clasificar y resumir, así que priorizamos baja latencia. Además se limita la salida (`maxOutputTokens: 700`) y se usa `temperature: 0.2` para resultados consistentes.
 
 Cambiar de modelo es modificar una constante en `app/api/evaluate/route.ts`:
 
 ```ts
-const OPENAI_MODEL = 'gpt-4o-mini'
-const GATEWAY_MODEL = 'openai/gpt-5-mini'
+const MODEL = 'openai/gpt-4.1-mini'
 ```
 
 ## Guía de uso
@@ -293,19 +292,12 @@ curl -X POST http://localhost:3000/api/evaluate \
 
 1. Sube el repositorio a GitHub.
 2. En [vercel.com/new](https://vercel.com/new), importa el repositorio. Vercel detecta Next.js automáticamente; no hace falta configuración de build.
-3. En **Settings → Environment Variables**, añade:
-
-   | Nombre           | Valor     | Entornos                          |
-   | ---------------- | --------- | --------------------------------- |
-   | `OPENAI_API_KEY` | `sk-...`  | Production, Preview y Development |
-
-4. Pulsa **Deploy**. Si cambias variables después, haz **Redeploy** para que se apliquen.
+3. Pulsa **Deploy**. No hay variables de entorno que añadir: el AI Gateway se autentica automáticamente con OIDC en Vercel.
 
 Detalles a tener en cuenta:
 
 - El Route Handler declara `maxDuration = 60` para tolerar respuestas lentas del modelo.
-- Sin `OPENAI_API_KEY`, el despliegue en Vercel sigue funcionando a través del AI Gateway (autenticación automática).
-- Para otros proveedores (Netlify, Docker, etc.), ejecuta `pnpm build && pnpm start` y define `OPENAI_API_KEY` como variable de entorno del servidor.
+- Para otros proveedores de hosting (Netlify, Docker, etc.), ejecuta `pnpm build && pnpm start` y define `AI_GATEWAY_API_KEY` como variable de entorno del servidor.
 
 ## Seguridad
 
@@ -332,7 +324,7 @@ pnpm audit       # vulnerabilidades en dependencias de producción
 Cobertura de la suite (`tests/`):
 
 - **`evaluation.test.ts`**: umbrales de clasificación (0/49/50/69/70/84/85/100), `clampScore` y esquemas Zod (límites, espacios, tipos erróneos).
-- **`evaluate-route.test.ts`**: el Route Handler con el modelo simulado: respuesta correcta con score acotado, delimitadores anti prompt injection, `400` (JSON inválido / entrada corta), `413`, `415`, `429`, fallback de proveedor y `502` genérico que no filtra claves ni errores del proveedor.
+- **`evaluate-route.test.ts`**: el Route Handler con el modelo simulado: respuesta correcta con score acotado, delimitadores anti prompt injection, `400` (JSON inválido / entrada corta), `413`, `415`, `429`, uso del AI Gateway y `502` genérico que no filtra claves ni errores del proveedor.
 
 ## Accesibilidad y UX
 
@@ -347,9 +339,9 @@ Cobertura de la suite (`tests/`):
 
 **Decisiones**
 
-- *Route Handler + AI SDK* en lugar de llamar a OpenAI desde el cliente: protege la clave y permite validar y normalizar.
+- *Route Handler + AI SDK* en lugar de llamar al modelo desde el cliente: protege las credenciales y permite validar y normalizar.
 - *Salida estructurada con esquema* en lugar de parsear texto: respuestas predecibles y tipadas de extremo a extremo.
-- *Fallback de proveedor*: mejora la disponibilidad sin complicar el cliente.
+- *AI Gateway con modelo sin razonamiento*: sin claves que gestionar, menor latencia y posibilidad de cambiar de proveedor modificando una sola constante.
 - *Sin base de datos*, según el alcance de la prueba.
 
 **Mejoras posibles**
@@ -365,10 +357,10 @@ Cobertura de la suite (`tests/`):
 
 | Síntoma                                                              | Causa probable y solución                                                                                         |
 | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| "We could not complete the evaluation right now"                     | Clave inválida, sin crédito o sin acceso al modelo. Revisa `OPENAI_API_KEY` y el saldo; consulta los logs (`[evaluate] Provider ... failed`). |
+| "We could not complete the evaluation right now"                     | Fuera de Vercel: falta o es inválida `AI_GATEWAY_API_KEY`, o no hay crédito en el Gateway. Consulta los logs (`[evaluate] Model call failed`). |
 | El botón muestra errores de longitud                                 | Cada campo necesita al menos 100 caracteres. Usa los datos demo para probar.                                       |
 | Cambié `.env.local` y no surte efecto                                | Reinicia `pnpm dev`.                                                                                              |
-| Funciona en local pero no en Vercel                                  | Añade `OPENAI_API_KEY` en Settings → Environment Variables y haz Redeploy.                                         |
+| Funciona en Vercel pero no en local                                  | Define `AI_GATEWAY_API_KEY` en `.env.local` y reinicia `pnpm dev`.                                                 |
 
 ---
 
