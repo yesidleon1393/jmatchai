@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Briefcase, Loader2, RotateCcw, UserRound, Wand2, AlertTriangle } from 'lucide-react'
+import { Briefcase, Dices, Loader2, RotateCcw, UserRound, Wand2, AlertTriangle } from 'lucide-react'
+import { pickRandomDemoCase } from '@/lib/demo-data'
 import { ResultPanel } from '@/components/result-panel'
 import { TextFieldWithCounter } from '@/components/text-field-with-counter'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -47,6 +48,7 @@ export function EvaluationForm() {
   const jobRef = useRef<HTMLTextAreaElement>(null)
   const resumeRef = useRef<HTMLTextAreaElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
+  const demoIdRef = useRef<string | undefined>(undefined)
 
   const isLoading = state.status === 'loading'
 
@@ -86,7 +88,17 @@ export function EvaluationForm() {
     }
   }
 
+  function handleFillDemo() {
+    const demoCase = pickRandomDemoCase(demoIdRef.current)
+    demoIdRef.current = demoCase.id
+    setJobDescription(demoCase.jobDescription)
+    setResume(demoCase.resume)
+    setShowValidation(false)
+    setState({ status: 'idle' })
+  }
+
   function handleReset() {
+    demoIdRef.current = undefined
     setJobDescription('')
     setResume('')
     setShowValidation(false)
@@ -138,6 +150,17 @@ export function EvaluationForm() {
             Your text is sent securely to the evaluation service and is not stored.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              onClick={handleFillDemo}
+              disabled={isLoading}
+              className="h-11 gap-2 px-4"
+            >
+              <Dices className="size-4" aria-hidden="true" />
+              Fill with demo data
+            </Button>
             {hasContent && (
               <Button
                 type="button"
