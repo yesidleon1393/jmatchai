@@ -14,6 +14,8 @@ interface TextFieldWithCounterProps {
   disabled?: boolean
   icon?: React.ReactNode
   textareaRef?: Ref<HTMLTextAreaElement>
+  headerAction?: React.ReactNode
+  notice?: React.ReactNode
 }
 
 export function TextFieldWithCounter({
@@ -28,6 +30,8 @@ export function TextFieldWithCounter({
   disabled,
   icon,
   textareaRef,
+  headerAction,
+  notice,
 }: TextFieldWithCounterProps) {
   const length = value.trim().length
   const isTooShort = length < minLength
@@ -37,14 +41,16 @@ export function TextFieldWithCounter({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <label
-        htmlFor={id}
-        className="flex items-center gap-2 text-sm font-semibold text-foreground"
-      >
-        {icon}
-        {label}
-        <span className="text-xs font-normal text-muted-foreground">Required</span>
-      </label>
+      <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
+        <label htmlFor={id} className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          {icon}
+          {label}
+          <span className="text-xs font-normal text-muted-foreground">Required</span>
+        </label>
+        {headerAction}
+      </div>
+
+      {notice}
 
       <Textarea
         id={id}
