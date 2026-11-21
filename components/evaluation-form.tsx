@@ -1,47 +1,117 @@
 'use client'
 
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Briefcase, Dices, Loader2, RotateCcw, UserRound, Wand2, AlertTriangle } from 'lucide-react'
-import { pickRandomDemoCase } from '@/lib/demo-data'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import {
+  AlertTriangle,
+  Briefcase,
+  Dices,
+  FileUp,
+  Link2,
+  Loader2,
+  RotateCcw,
+  Type,
+  UserRound,
+  Wand2,
+  X,
+} from 'lucide-react'
+import { AtsReport } from '@/components/ats-report'
+import { HistoryPanel } from '@/components/history-panel'
+import { JobLinkImport } from '@/components/job-link-import'
+import { ModeToggle } from '@/components/mode-toggle'
 import { ResultPanel } from '@/components/result-panel'
+import { ResumeUpload } from '@/components/resume-upload'
 import { TextFieldWithCounter } from '@/components/text-field-with-counter'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { pickRandomDemoCase } from '@/lib/demo-data'
 import {
   MAX_INPUT_LENGTH,
   MIN_INPUT_LENGTH,
   type EvaluationResult,
   type EvaluationState,
 } from '@/lib/evaluation'
+import {
+  EMPTY_DRAFT,
+  createHistoryEntry,
+  readDraft,
+  readHistory,
+  writeDraft,
+  writeHistory,
+  type Draft,
+  type HistoryEntry,
+} from '@/lib/storage'
 
 const GENERIC_ERROR = 'Something went wrong while analyzing the candidate. Please try again.'
+const DRAFT_SAVE_DELAY_MS = 400
 
-async function requestEvaluation(
-  jobDescription: string,
-  resume: string,
-): Promise<EvaluationResult> {
+type JobMode = 'text' | 'link'
+type ResumeMode = 'text' | 'upload'
+
+async function readError(response: Response, fallback: string): Promise<string> {
+  const payload: unknown = await response.json().catch(() => null)
+  return payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+    ? payload.error
+    : fallback
+}
+
+async function requestEvaluation(jobDescription: string, resume: string): Promise<EvaluationResult> {
   const response = await fetch('/api/evaluate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jobDescription, resume }),
   })
-
-  const payload: unknown = await response.json().catch(() => null)
-
-  if (!response.ok) {
-    const message =
-      payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-        ? payload.error
-        : GENERIC_ERROR
-    throw new Error(message)
-  }
-
-  return payload as EvaluationResult
+  if (!response.ok) throw new Error(await readError(response, GENERIC_ERROR))
+  return (await response.json()) as EvaluationResult
 }
 
+interface ImportedJob {
+  text: string
+  title: string
+  host: string
+  truncated: boolean
+}
+
+async function requestJobImport(url: string): Promise<ImportedJob> {
+  const response = await fetch('/api/job-link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  if (!response.ok) throw new Error(await readError(response, 'We could not import that link. Paste the text instead.'))
+  return (await response.json()) as ImportedJob
+}
+
+interface UploadedResume {
+  fileName: string
+  fileSize: number
+  text: string
+  truncated: boolean
+  pageCount: number | null
+  ats: NonNullable<Draft['resumeFile']>['ats']
+}
+
+async function requestResumeUpload(file: File): Promise<UploadedResume> {
+  const body = new FormData()
+  body.append('file', file)
+  const response = await fetch('/api/parse-resume', { method: 'POST', body })
+  if (!response.ok) throw new Error(await readError(response, 'We could not read this file. Paste the text instead.'))
+  return (await response.json()) as UploadedResume
+}
+
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+
 export function EvaluationForm() {
-  const [jobDescription, setJobDescription] = useState('')
-  const [resume, setResume] = useState('')
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [isHydrated, setIsHydrated] = useState(false)
+
+  const [jobMode, setJobMode] = useState<JobMode>('text')
+  const [resumeMode, setResumeMode] = useState<ResumeMode>('text')
+  const [isImporting, setIsImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
   const [showValidation, setShowValidation] = useState(false)
   const [state, setState] = useState<EvaluationState>({ status: 'idle' })
 
@@ -51,6 +121,27 @@ export function EvaluationForm() {
   const demoIdRef = useRef<string | undefined>(undefined)
 
   const isLoading = state.status === 'loading'
+  const isBusy = isLoading || isImporting || isUploading
+
+  const updateDraft = useCallback((patch: Partial<Draft>) => {
+    setDraft((current) => ({ ...current, ...patch }))
+  }, [])
+
+  useEffect(() => {
+    const savedDraft = readDraft()
+    if (savedDraft) {
+      setDraft(savedDraft)
+      if (!savedDraft.jobDescription && savedDraft.jobUrl) setJobMode('link')
+    }
+    setHistory(readHistory())
+    setIsHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!isHydrated) return
+    const timeout = window.setTimeout(() => writeDraft(draft), DRAFT_SAVE_DELAY_MS)
+    return () => window.clearTimeout(timeout)
+  }, [draft, isHydrated])
 
   useEffect(() => {
     if (state.status === 'success' || state.status === 'error') {
@@ -58,16 +149,27 @@ export function EvaluationForm() {
     }
   }, [state.status])
 
+  function persistHistory(next: HistoryEntry[]) {
+    setHistory(next)
+    writeHistory(next)
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (isLoading) return
+    if (isBusy) return
 
-    const job = jobDescription.trim()
-    const candidate = resume.trim()
+    const job = draft.jobDescription.trim()
+    const candidate = draft.resume.trim()
 
     if (job.length < MIN_INPUT_LENGTH || candidate.length < MIN_INPUT_LENGTH) {
       setShowValidation(true)
-      ;(job.length < MIN_INPUT_LENGTH ? jobRef : resumeRef).current?.focus()
+      if (job.length < MIN_INPUT_LENGTH) {
+        setJobMode('text')
+        window.setTimeout(() => jobRef.current?.focus(), 0)
+      } else {
+        setResumeMode('text')
+        window.setTimeout(() => resumeRef.current?.focus(), 0)
+      }
       return
     }
 
@@ -75,6 +177,10 @@ export function EvaluationForm() {
     try {
       const result = await requestEvaluation(job, candidate)
       setState({ status: 'success', result })
+      persistHistory([
+        createHistoryEntry({ jobDescription: job, resume: candidate, result }),
+        ...history,
+      ])
     } catch (error) {
       setState({
         status: 'error',
@@ -88,66 +194,262 @@ export function EvaluationForm() {
     }
   }
 
+  async function handleImportJob() {
+    setImportError(null)
+    setIsImporting(true)
+    try {
+      const job = await requestJobImport(draft.jobUrl.trim())
+      updateDraft({
+        jobDescription: job.text,
+        jobSource: { host: job.host, title: job.title },
+      })
+      setJobMode('text')
+      setShowValidation(false)
+    } catch (error) {
+      setImportError(
+        error instanceof TypeError
+          ? 'Network error. Check your connection and try again.'
+          : error instanceof Error
+            ? error.message
+            : 'We could not import that link.',
+      )
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  async function handleResumeFile(file: File) {
+    setUploadError(null)
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError('The file is too large. The maximum size is 4 MB.')
+      return
+    }
+
+    setIsUploading(true)
+    try {
+      const parsed = await requestResumeUpload(file)
+      updateDraft({
+        resume: parsed.text,
+        resumeFile: {
+          name: parsed.fileName,
+          size: parsed.fileSize,
+          pageCount: parsed.pageCount,
+          truncated: parsed.truncated,
+          ats: parsed.ats,
+        },
+      })
+      setResumeMode('text')
+      setShowValidation(false)
+    } catch (error) {
+      setUploadError(
+        error instanceof TypeError
+          ? 'Network error. Check your connection and try again.'
+          : error instanceof Error
+            ? error.message
+            : 'We could not read this file.',
+      )
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  function resetInputModes() {
+    setJobMode('text')
+    setResumeMode('text')
+    setImportError(null)
+    setUploadError(null)
+  }
+
   function handleFillDemo() {
     const demoCase = pickRandomDemoCase(demoIdRef.current)
     demoIdRef.current = demoCase.id
-    setJobDescription(demoCase.jobDescription)
-    setResume(demoCase.resume)
+    setDraft({
+      ...EMPTY_DRAFT,
+      jobDescription: demoCase.jobDescription,
+      resume: demoCase.resume,
+    })
+    resetInputModes()
     setShowValidation(false)
     setState({ status: 'idle' })
   }
 
   function handleReset() {
     demoIdRef.current = undefined
-    setJobDescription('')
-    setResume('')
+    setDraft(EMPTY_DRAFT)
+    resetInputModes()
     setShowValidation(false)
     setState({ status: 'idle' })
     jobRef.current?.focus()
   }
 
-  const hasContent = jobDescription.length > 0 || resume.length > 0
+  function handleRestore(entry: HistoryEntry) {
+    setDraft({ ...EMPTY_DRAFT, jobDescription: entry.jobDescription, resume: entry.resume })
+    resetInputModes()
+    setShowValidation(false)
+    setState({ status: 'success', result: entry.result })
+    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const hasContent = Boolean(draft.jobDescription || draft.resume || draft.jobUrl || draft.resumeFile)
+
+  const jobNotice = draft.jobSource && (
+    <p className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-xs text-foreground">
+      <Link2 className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">
+        Imported from <span className="font-semibold">{draft.jobSource.host}</span>
+        {draft.jobSource.title && ` · ${draft.jobSource.title}`}. Review and edit the text if needed.
+      </span>
+      <button
+        type="button"
+        onClick={() => updateDraft({ jobSource: null })}
+        aria-label="Dismiss import notice"
+        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <X className="size-3.5" aria-hidden="true" />
+      </button>
+    </p>
+  )
 
   return (
     <div className="flex flex-col gap-10">
       <form
         onSubmit={handleSubmit}
         noValidate
-        aria-busy={isLoading}
+        aria-busy={isBusy}
         className="rounded-2xl border bg-card p-4 shadow-xs sm:p-8"
       >
-        <div className="grid gap-8 lg:grid-cols-2">
-          <TextFieldWithCounter
-            id="job-description"
-            label="Job Description"
-            placeholder="Paste the job description here..."
-            value={jobDescription}
-            onChange={setJobDescription}
-            minLength={MIN_INPUT_LENGTH}
-            maxLength={MAX_INPUT_LENGTH}
-            showError={showValidation}
-            disabled={isLoading}
-            textareaRef={jobRef}
-            icon={<Briefcase className="size-4 text-primary" aria-hidden="true" />}
-          />
-          <TextFieldWithCounter
-            id="candidate-resume"
-            label="Candidate Resume"
-            placeholder="Paste the candidate's resume here..."
-            value={resume}
-            onChange={setResume}
-            minLength={MIN_INPUT_LENGTH}
-            maxLength={MAX_INPUT_LENGTH}
-            showError={showValidation}
-            disabled={isLoading}
-            textareaRef={resumeRef}
-            icon={<UserRound className="size-4 text-primary" aria-hidden="true" />}
-          />
+        <div className="grid items-start gap-8 lg:grid-cols-2">
+          <div className="flex flex-col gap-4">
+            {jobMode === 'link' ? (
+              <div className="flex flex-col gap-2.5">
+                <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <Briefcase className="size-4 text-primary" aria-hidden="true" />
+                    Job Description
+                    <span className="text-xs font-normal text-muted-foreground">Required</span>
+                  </span>
+                  <ModeToggle
+                    ariaLabel="Job description input method"
+                    value={jobMode}
+                    onChange={setJobMode}
+                    disabled={isBusy}
+                    options={[
+                      { value: 'text', label: 'Paste text', icon: <Type className="size-3.5" aria-hidden="true" /> },
+                      { value: 'link', label: 'Job link', icon: <Link2 className="size-3.5" aria-hidden="true" /> },
+                    ]}
+                  />
+                </div>
+                <JobLinkImport
+                  url={draft.jobUrl}
+                  onUrlChange={(jobUrl) => {
+                    setImportError(null)
+                    updateDraft({ jobUrl })
+                  }}
+                  onImport={handleImportJob}
+                  isImporting={isImporting}
+                  error={importError}
+                  disabled={isLoading}
+                />
+              </div>
+            ) : (
+              <TextFieldWithCounter
+                id="job-description"
+                label="Job Description"
+                placeholder="Paste the job description here..."
+                value={draft.jobDescription}
+                onChange={(jobDescription) => updateDraft({ jobDescription, jobSource: null })}
+                minLength={MIN_INPUT_LENGTH}
+                maxLength={MAX_INPUT_LENGTH}
+                showError={showValidation}
+                disabled={isBusy}
+                textareaRef={jobRef}
+                icon={<Briefcase className="size-4 text-primary" aria-hidden="true" />}
+                notice={jobNotice}
+                headerAction={
+                  <ModeToggle
+                    ariaLabel="Job description input method"
+                    value={jobMode}
+                    onChange={setJobMode}
+                    disabled={isBusy}
+                    options={[
+                      { value: 'text', label: 'Paste text', icon: <Type className="size-3.5" aria-hidden="true" /> },
+                      { value: 'link', label: 'Job link', icon: <Link2 className="size-3.5" aria-hidden="true" /> },
+                    ]}
+                  />
+                }
+              />
+            )}
+          </div>
+
+          <div className="flex flex-col gap-4">
+            {resumeMode === 'upload' ? (
+              <div className="flex flex-col gap-2.5">
+                <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <UserRound className="size-4 text-primary" aria-hidden="true" />
+                    Candidate Resume
+                    <span className="text-xs font-normal text-muted-foreground">Required</span>
+                  </span>
+                  <ModeToggle
+                    ariaLabel="Resume input method"
+                    value={resumeMode}
+                    onChange={setResumeMode}
+                    disabled={isBusy}
+                    options={[
+                      { value: 'text', label: 'Paste text', icon: <Type className="size-3.5" aria-hidden="true" /> },
+                      { value: 'upload', label: 'Upload file', icon: <FileUp className="size-3.5" aria-hidden="true" /> },
+                    ]}
+                  />
+                </div>
+                <ResumeUpload
+                  onFile={handleResumeFile}
+                  isUploading={isUploading}
+                  error={uploadError}
+                  disabled={isLoading}
+                />
+              </div>
+            ) : (
+              <TextFieldWithCounter
+                id="candidate-resume"
+                label="Candidate Resume"
+                placeholder="Paste the candidate's resume here..."
+                value={draft.resume}
+                onChange={(resume) => updateDraft({ resume })}
+                minLength={MIN_INPUT_LENGTH}
+                maxLength={MAX_INPUT_LENGTH}
+                showError={showValidation}
+                disabled={isBusy}
+                textareaRef={resumeRef}
+                icon={<UserRound className="size-4 text-primary" aria-hidden="true" />}
+                headerAction={
+                  <ModeToggle
+                    ariaLabel="Resume input method"
+                    value={resumeMode}
+                    onChange={setResumeMode}
+                    disabled={isBusy}
+                    options={[
+                      { value: 'text', label: 'Paste text', icon: <Type className="size-3.5" aria-hidden="true" /> },
+                      { value: 'upload', label: 'Upload file', icon: <FileUp className="size-3.5" aria-hidden="true" /> },
+                    ]}
+                  />
+                }
+              />
+            )}
+
+            {draft.resumeFile && (
+              <AtsReport
+                file={draft.resumeFile}
+                disabled={isBusy}
+                onRemove={() => updateDraft({ resumeFile: null })}
+              />
+            )}
+          </div>
         </div>
 
         <div className="mt-8 flex flex-col-reverse items-stretch gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Your text is sent securely to the evaluation service and is not stored.
+            Text, links and files are sent securely to the evaluation service and are not stored on our servers. Your
+            draft and recent evaluations are saved only in this browser.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Button
@@ -155,7 +457,7 @@ export function EvaluationForm() {
               variant="outline"
               size="lg"
               onClick={handleFillDemo}
-              disabled={isLoading}
+              disabled={isBusy}
               className="h-11 gap-2 px-4"
             >
               <Dices className="size-4" aria-hidden="true" />
@@ -167,14 +469,14 @@ export function EvaluationForm() {
                 variant="ghost"
                 size="lg"
                 onClick={handleReset}
-                disabled={isLoading}
+                disabled={isBusy}
                 className="h-11 gap-2 px-4"
               >
                 <RotateCcw className="size-4" aria-hidden="true" />
                 Clear
               </Button>
             )}
-            <Button type="submit" size="lg" disabled={isLoading} className="h-11 gap-2 px-6 text-sm font-semibold">
+            <Button type="submit" size="lg" disabled={isBusy} className="h-11 gap-2 px-6 text-sm font-semibold">
               {isLoading ? (
                 <>
                   <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -215,6 +517,14 @@ export function EvaluationForm() {
 
         {state.status === 'success' && <ResultPanel result={state.result} />}
       </div>
+
+      <HistoryPanel
+        entries={history}
+        disabled={isBusy}
+        onRestore={handleRestore}
+        onDelete={(id) => persistHistory(history.filter((entry) => entry.id !== id))}
+        onClear={() => persistHistory([])}
+      />
     </div>
   )
 }
