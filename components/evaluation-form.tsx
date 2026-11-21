@@ -6,17 +6,14 @@ import {
   Briefcase,
   Dices,
   FileUp,
-  Link2,
   Loader2,
   RotateCcw,
   Type,
   UserRound,
   Wand2,
-  X,
 } from 'lucide-react'
 import { AtsReport } from '@/components/ats-report'
 import { HistoryPanel } from '@/components/history-panel'
-import { JobLinkImport } from '@/components/job-link-import'
 import { ModeToggle } from '@/components/mode-toggle'
 import { ResultPanel } from '@/components/result-panel'
 import { ResumeUpload } from '@/components/resume-upload'
@@ -44,7 +41,6 @@ import {
 const GENERIC_ERROR = 'Something went wrong while analyzing the candidate. Please try again.'
 const DRAFT_SAVE_DELAY_MS = 400
 
-type JobMode = 'text' | 'link'
 type ResumeMode = 'text' | 'upload'
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -62,23 +58,6 @@ async function requestEvaluation(jobDescription: string, resume: string): Promis
   })
   if (!response.ok) throw new Error(await readError(response, GENERIC_ERROR))
   return (await response.json()) as EvaluationResult
-}
-
-interface ImportedJob {
-  text: string
-  title: string
-  host: string
-  truncated: boolean
-}
-
-async function requestJobImport(url: string): Promise<ImportedJob> {
-  const response = await fetch('/api/job-link', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  })
-  if (!response.ok) throw new Error(await readError(response, 'We could not import that link. Paste the text instead.'))
-  return (await response.json()) as ImportedJob
 }
 
 interface UploadedResume {
@@ -105,10 +84,7 @@ export function EvaluationForm() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [isHydrated, setIsHydrated] = useState(false)
 
-  const [jobMode, setJobMode] = useState<JobMode>('text')
   const [resumeMode, setResumeMode] = useState<ResumeMode>('text')
-  const [isImporting, setIsImporting] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
@@ -121,7 +97,7 @@ export function EvaluationForm() {
   const demoIdRef = useRef<string | undefined>(undefined)
 
   const isLoading = state.status === 'loading'
-  const isBusy = isLoading || isImporting || isUploading
+  const isBusy = isLoading || isUploading
 
   const updateDraft = useCallback((patch: Partial<Draft>) => {
     setDraft((current) => ({ ...current, ...patch }))
@@ -129,10 +105,7 @@ export function EvaluationForm() {
 
   useEffect(() => {
     const savedDraft = readDraft()
-    if (savedDraft) {
-      setDraft(savedDraft)
-      if (!savedDraft.jobDescription && savedDraft.jobUrl) setJobMode('link')
-    }
+    if (savedDraft) setDraft(savedDraft)
     setHistory(readHistory())
     setIsHydrated(true)
   }, [])
@@ -164,7 +137,6 @@ export function EvaluationForm() {
     if (job.length < MIN_INPUT_LENGTH || candidate.length < MIN_INPUT_LENGTH) {
       setShowValidation(true)
       if (job.length < MIN_INPUT_LENGTH) {
-        setJobMode('text')
         window.setTimeout(() => jobRef.current?.focus(), 0)
       } else {
         setResumeMode('text')
@@ -191,30 +163,6 @@ export function EvaluationForm() {
               ? error.message
               : GENERIC_ERROR,
       })
-    }
-  }
-
-  async function handleImportJob() {
-    setImportError(null)
-    setIsImporting(true)
-    try {
-      const job = await requestJobImport(draft.jobUrl.trim())
-      updateDraft({
-        jobDescription: job.text,
-        jobSource: { host: job.host, title: job.title },
-      })
-      setJobMode('text')
-      setShowValidation(false)
-    } catch (error) {
-      setImportError(
-        error instanceof TypeError
-          ? 'Network error. Check your connection and try again.'
-          : error instanceof Error
-            ? error.message
-            : 'We could not import that link.',
-      )
-    } finally {
-      setIsImporting(false)
     }
   }
 
@@ -254,9 +202,7 @@ export function EvaluationForm() {
   }
 
   function resetInputModes() {
-    setJobMode('text')
     setResumeMode('text')
-    setImportError(null)
     setUploadError(null)
   }
 
@@ -290,25 +236,7 @@ export function EvaluationForm() {
     resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  const hasContent = Boolean(draft.jobDescription || draft.resume || draft.jobUrl || draft.resumeFile)
-
-  const jobNotice = draft.jobSource && (
-    <p className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-xs text-foreground">
-      <Link2 className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate">
-        Imported from <span className="font-semibold">{draft.jobSource.host}</span>
-        {draft.jobSource.title && ` · ${draft.jobSource.title}`}. Review and edit the text if needed.
-      </span>
-      <button
-        type="button"
-        onClick={() => updateDraft({ jobSource: null })}
-        aria-label="Dismiss import notice"
-        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <X className="size-3.5" aria-hidden="true" />
-      </button>
-    </p>
-  )
+  const hasContent = Boolean(draft.jobDescription || draft.resume || draft.resumeFile)
 
   return (
     <div className="flex flex-col gap-10">
@@ -320,65 +248,19 @@ export function EvaluationForm() {
       >
         <div className="grid items-start gap-8 lg:grid-cols-2">
           <div className="flex flex-col gap-4">
-            {jobMode === 'link' ? (
-              <div className="flex flex-col gap-2.5">
-                <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <Briefcase className="size-4 text-primary" aria-hidden="true" />
-                    Job Description
-                    <span className="text-xs font-normal text-muted-foreground">Required</span>
-                  </span>
-                  <ModeToggle
-                    ariaLabel="Job description input method"
-                    value={jobMode}
-                    onChange={setJobMode}
-                    disabled={isBusy}
-                    options={[
-                      { value: 'text', label: 'Paste text', icon: <Type className="size-3.5" aria-hidden="true" /> },
-                      { value: 'link', label: 'Job link', icon: <Link2 className="size-3.5" aria-hidden="true" /> },
-                    ]}
-                  />
-                </div>
-                <JobLinkImport
-                  url={draft.jobUrl}
-                  onUrlChange={(jobUrl) => {
-                    setImportError(null)
-                    updateDraft({ jobUrl })
-                  }}
-                  onImport={handleImportJob}
-                  isImporting={isImporting}
-                  error={importError}
-                  disabled={isLoading}
-                />
-              </div>
-            ) : (
-              <TextFieldWithCounter
-                id="job-description"
-                label="Job Description"
-                placeholder="Paste the job description here..."
-                value={draft.jobDescription}
-                onChange={(jobDescription) => updateDraft({ jobDescription, jobSource: null })}
-                minLength={MIN_INPUT_LENGTH}
-                maxLength={MAX_INPUT_LENGTH}
-                showError={showValidation}
-                disabled={isBusy}
-                textareaRef={jobRef}
-                icon={<Briefcase className="size-4 text-primary" aria-hidden="true" />}
-                notice={jobNotice}
-                headerAction={
-                  <ModeToggle
-                    ariaLabel="Job description input method"
-                    value={jobMode}
-                    onChange={setJobMode}
-                    disabled={isBusy}
-                    options={[
-                      { value: 'text', label: 'Paste text', icon: <Type className="size-3.5" aria-hidden="true" /> },
-                      { value: 'link', label: 'Job link', icon: <Link2 className="size-3.5" aria-hidden="true" /> },
-                    ]}
-                  />
-                }
-              />
-            )}
+            <TextFieldWithCounter
+              id="job-description"
+              label="Job Description"
+              placeholder="Paste the job description here..."
+              value={draft.jobDescription}
+              onChange={(jobDescription) => updateDraft({ jobDescription })}
+              minLength={MIN_INPUT_LENGTH}
+              maxLength={MAX_INPUT_LENGTH}
+              showError={showValidation}
+              disabled={isBusy}
+              textareaRef={jobRef}
+              icon={<Briefcase className="size-4 text-primary" aria-hidden="true" />}
+            />
           </div>
 
           <div className="flex flex-col gap-4">
@@ -448,7 +330,7 @@ export function EvaluationForm() {
 
         <div className="mt-8 flex flex-col-reverse items-stretch gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Text, links and files are sent securely to the evaluation service and are not stored on our servers. Your
+            Text and files are sent securely to the evaluation service and are not stored on our servers. Your
             draft and recent evaluations are saved only in this browser.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row">
