@@ -27,15 +27,8 @@ export const resumeFileInfoSchema = z.object({
   ats: atsReportSchema,
 })
 
-export const jobSourceSchema = z.object({
-  host: z.string().max(255),
-  title: z.string().max(300),
-})
-
 const draftSchema = z.object({
   jobDescription: z.string().max(MAX_INPUT_LENGTH),
-  jobUrl: z.string().max(2048),
-  jobSource: jobSourceSchema.nullable(),
   resume: z.string().max(MAX_INPUT_LENGTH),
   resumeFile: resumeFileInfoSchema.nullable(),
 })
@@ -51,20 +44,17 @@ const historyEntrySchema = z.object({
 })
 
 export type ResumeFileInfo = z.infer<typeof resumeFileInfoSchema>
-export type JobSource = z.infer<typeof jobSourceSchema>
 export type Draft = z.infer<typeof draftSchema>
 export type HistoryEntry = z.infer<typeof historyEntrySchema>
 
 export const EMPTY_DRAFT: Draft = {
   jobDescription: '',
-  jobUrl: '',
-  jobSource: null,
   resume: '',
   resumeFile: null,
 }
 
 export function isDraftEmpty(draft: Draft): boolean {
-  return !draft.jobDescription && !draft.resume && !draft.jobUrl && !draft.resumeFile
+  return !draft.jobDescription && !draft.resume && !draft.resumeFile
 }
 
 function getStorage(): Storage | null {
